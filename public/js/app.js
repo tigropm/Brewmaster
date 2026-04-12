@@ -32,27 +32,95 @@ const ANWENDUNG_OPTIONS = [
 ];
 
 const TAG_CLASS = {
-  Espresso:      'espresso',
+  Espresso:        'espresso',
   'Milchgetränke': 'milk',
-  Lungo:         'lungo',
-  Americano:     'americano',
-  Filter:        'filter',
+  Lungo:           'lungo',
+  Americano:       'americano',
+  Filter:          'filter',
 };
+
+// ============================================================
+//  STORAGE  (localStorage – no backend required)
+// ============================================================
+
+const storage = {
+  KEY: 'brewmaster_recipes',
+
+  getAll() {
+    try {
+      return JSON.parse(localStorage.getItem(this.KEY) || '[]');
+    } catch {
+      return [];
+    }
+  },
+
+  _save(recipes) {
+    localStorage.setItem(this.KEY, JSON.stringify(recipes, null, 2));
+  },
+
+  create(data) {
+    const recipes = this.getAll();
+    const recipe = {
+      id: crypto.randomUUID(),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      ...sanitize(data),
+    };
+    recipes.unshift(recipe);
+    this._save(recipes);
+    return recipe;
+  },
+
+  update(id, data) {
+    const recipes = this.getAll();
+    const idx = recipes.findIndex(r => r.id === id);
+    if (idx === -1) throw new Error('Rezept nicht gefunden');
+    recipes[idx] = {
+      ...recipes[idx],
+      ...sanitize(data),
+      id,
+      updatedAt: new Date().toISOString(),
+    };
+    this._save(recipes);
+    return recipes[idx];
+  },
+
+  remove(id) {
+    this._save(this.getAll().filter(r => r.id !== id));
+  },
+
+  replaceAll(recipes) {
+    this._save(recipes);
+  },
+};
+
+function sanitize(body) {
+  return {
+    marke:       String(body.marke       ?? '').trim(),
+    name:        String(body.name        ?? '').trim(),
+    mahlgrad:    body.mahlgrad    != null && body.mahlgrad    !== '' ? Number(body.mahlgrad)    : null,
+    mahlzeit:    body.mahlzeit    != null && body.mahlzeit    !== '' ? Number(body.mahlzeit)    : null,
+    kaffeemenge: body.kaffeemenge != null && body.kaffeemenge !== '' ? Number(body.kaffeemenge) : null,
+    sieb:        String(body.sieb        ?? '').trim(),
+    bruehzeit:   body.bruehzeit   != null && body.bruehzeit   !== '' ? Number(body.bruehzeit)   : null,
+    bruehmenge:  body.bruehmenge  != null && body.bruehmenge  !== '' ? Number(body.bruehmenge)  : null,
+    anwendung:   Array.isArray(body.anwendung) ? body.anwendung.map(String) : [],
+  };
+}
 
 // ============================================================
 //  STATE
 // ============================================================
 
 const state = {
-  recipes:          [],
-  view:             'list',   // 'list' | 'detail' | 'form'
-  activeId:         null,
-  editingId:        null,     // null = new recipe
-  searchQuery:      '',
-  searchVisible:    false,
-  loading:          false,
-  deleteConfirmId:  null,
-  _toastTimer:      null,
+  recipes:         [],
+  view:            'list',  // 'list' | 'detail' | 'form'
+  activeId:        null,
+  editingId:       null,
+  searchQuery:     '',
+  searchVisible:   false,
+  deleteConfirmId: null,
+  _toastTimer:     null,
 };
 
 // ============================================================
@@ -100,40 +168,6 @@ function filteredRecipes() {
 }
 
 // ============================================================
-//  API
-// ============================================================
-
-const api = {
-  async getAll() {
-    const res = await fetch('/api/recipes');
-    if (!res.ok) throw new Error(await res.text());
-    return res.json();
-  },
-  async create(data) {
-    const res = await fetch('/api/recipes', {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify(data),
-    });
-    if (!res.ok) throw new Error(await res.text());
-    return res.json();
-  },
-  async update(id, data) {
-    const res = await fetch(`/api/recipes/${id}`, {
-      method:  'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify(data),
-    });
-    if (!res.ok) throw new Error(await res.text());
-    return res.json();
-  },
-  async remove(id) {
-    const res = await fetch(`/api/recipes/${id}`, { method: 'DELETE' });
-    if (!res.ok) throw new Error(await res.text());
-  },
-};
-
-// ============================================================
 //  TOAST
 // ============================================================
 
@@ -157,6 +191,42 @@ function showToast(msg, type = 'success') {
     el.classList.remove('toast--visible');
     setTimeout(() => el.remove(), 300);
   }, 3000);
+}
+
+// ============================================================
+//  EXPORT / IMPORT
+// ============================================================
+
+function exportRecipes() {
+  const json = JSON.stringify(state.recipes, null, 2);
+  const blob = new Blob([json], { type: 'application/json' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = `brewmaster-${new Date().toISOString().slice(0, 10)}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  showToast('Rezepte exportiert.');
+}
+
+function handleImportFile(file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const data = JSON.parse(e.target.result);
+      if (!Array.isArray(data)) throw new Error('Kein Array');
+      storage.replaceAll(data);
+      state.recipes = storage.getAll();
+      showToast(`${data.length} Rezept${data.length !== 1 ? 'e' : ''} importiert.`);
+      navigate('list');
+    } catch {
+      showToast('Import fehlgeschlagen – ungültige Datei.', 'error');
+    }
+  };
+  reader.readAsText(file);
 }
 
 // ============================================================
@@ -196,6 +266,20 @@ function renderListView() {
             aria-expanded="${state.searchVisible}">
             <i data-lucide="${state.searchVisible ? 'x' : 'search'}"></i>
           </button>
+          <button class="icon-btn" id="btn-export"
+            aria-label="Rezepte exportieren"
+            title="Als JSON exportieren"
+            ${state.recipes.length === 0 ? 'disabled' : ''}>
+            <i data-lucide="download"></i>
+          </button>
+          <label class="icon-btn" id="btn-import-label"
+            aria-label="Rezepte importieren"
+            title="JSON importieren"
+            role="button" tabindex="0">
+            <i data-lucide="upload"></i>
+            <input type="file" id="import-input" accept=".json"
+              style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;">
+          </label>
           <button class="icon-btn icon-btn--primary" id="btn-add"
             aria-label="Neues Rezept hinzufügen">
             <i data-lucide="plus"></i>
@@ -209,15 +293,10 @@ function renderListView() {
           <div class="search-bar__inner">
             <i data-lucide="search" class="search-bar__icon"></i>
             <input
-              type="search"
-              id="search-input"
-              class="search-bar__input"
+              type="search" id="search-input" class="search-bar__input"
               placeholder="Marke oder Name suchen…"
               value="${h(state.searchQuery)}"
-              autocomplete="off"
-              autocorrect="off"
-              autocapitalize="off"
-            >
+              autocomplete="off" autocorrect="off" autocapitalize="off">
             ${state.searchQuery ? `
               <button class="search-bar__clear" id="btn-search-clear"
                 aria-label="Suche löschen">
@@ -228,37 +307,12 @@ function renderListView() {
       ` : ''}
 
       <div class="list-content">
-        ${state.loading
-          ? renderSkeleton()
-          : list.length === 0
-            ? renderEmptyState()
-            : /* html */`
-              <ul class="recipe-list" role="list">
-                ${list.map(renderCard).join('')}
-              </ul>`
-        }
+        ${list.length === 0 ? renderEmptyState() : /* html */`
+          <ul class="recipe-list" role="list">
+            ${list.map(renderCard).join('')}
+          </ul>`}
       </div>
-    </div>
-  `;
-}
-
-function renderSkeleton() {
-  return /* html */`
-    <ul class="recipe-list" aria-busy="true" aria-label="Lade Rezepte…">
-      ${[1,2,3].map(() => /* html */`
-        <li>
-          <div class="recipe-card recipe-card--skeleton" aria-hidden="true">
-            <div class="recipe-card__header">
-              <div class="recipe-card__title-group">
-                <div class="skeleton skeleton--title"></div>
-                <div class="skeleton skeleton--subtitle"></div>
-              </div>
-            </div>
-            <div class="skeleton skeleton--tags"></div>
-            <div class="skeleton skeleton--stats"></div>
-          </div>
-        </li>`).join('')}
-    </ul>`;
+    </div>`;
 }
 
 function renderEmptyState() {
@@ -294,19 +348,16 @@ function renderCard(recipe) {
   const tags  = recipe.anwendung || [];
 
   const stats = [
-    recipe.mahlgrad    != null ? { label: 'Mahlgrad', value: h(String(recipe.mahlgrad)) }        : null,
+    recipe.mahlgrad    != null ? { label: 'Mahlgrad', value: h(String(recipe.mahlgrad)) }           : null,
     recipe.kaffeemenge != null ? { label: 'Dosis',    value: `${h(String(recipe.kaffeemenge))} g` } : null,
-    ratio               ? { label: 'Ratio',    value: h(ratio) }                                  : null,
-    recipe.sieb         ? { label: 'Sieb',     value: h(recipe.sieb), truncate: true }            : null,
+    ratio               ? { label: 'Ratio',    value: h(ratio) }                                    : null,
+    recipe.sieb         ? { label: 'Sieb',     value: h(recipe.sieb), truncate: true }              : null,
   ].filter(Boolean);
 
   return /* html */`
     <li>
-      <button
-        class="recipe-card"
-        data-id="${h(recipe.id)}"
-        aria-label="Rezept öffnen: ${h(recipe.marke)} ${h(recipe.name)}"
-      >
+      <button class="recipe-card" data-id="${h(recipe.id)}"
+        aria-label="Rezept öffnen: ${h(recipe.marke)} ${h(recipe.name)}">
         <div class="recipe-card__header">
           <div class="recipe-card__title-group">
             <span class="recipe-card__brand">${h(recipe.marke) || '—'}</span>
@@ -359,8 +410,9 @@ function renderDetailView() {
         <div class="detail-hero">
           <p class="detail-hero__brand">${h(r.marke) || '—'}</p>
           <h1 class="detail-hero__name">${h(r.name) || '—'}</h1>
-          ${(r.anwendung || []).length ? `
-            <div class="detail-hero__tags">${renderTags(r.anwendung)}</div>` : ''}
+          ${(r.anwendung || []).length
+            ? `<div class="detail-hero__tags">${renderTags(r.anwendung)}</div>`
+            : ''}
         </div>
 
         <div class="detail-sections">
@@ -372,8 +424,7 @@ function renderDetailView() {
               </h2>
               <dl class="detail-grid">
                 <div class="detail-row">
-                  <dt>Sieb</dt>
-                  <dd>${h(r.sieb)}</dd>
+                  <dt>Sieb</dt><dd>${h(r.sieb)}</dd>
                 </div>
               </dl>
             </section>` : ''}
@@ -384,12 +435,10 @@ function renderDetailView() {
             </h2>
             <dl class="detail-grid">
               <div class="detail-row">
-                <dt>Mahlgrad</dt>
-                <dd>${fmtNum(r.mahlgrad)}</dd>
+                <dt>Mahlgrad</dt><dd>${fmtNum(r.mahlgrad)}</dd>
               </div>
               <div class="detail-row">
-                <dt>Mahlzeit</dt>
-                <dd>${fmtSec(r.mahlzeit)}</dd>
+                <dt>Mahlzeit</dt><dd>${fmtSec(r.mahlzeit)}</dd>
               </div>
             </dl>
           </section>
@@ -400,21 +449,17 @@ function renderDetailView() {
             </h2>
             <dl class="detail-grid">
               <div class="detail-row">
-                <dt>Kaffeemenge</dt>
-                <dd>${fmtNum(r.kaffeemenge, 'g')}</dd>
+                <dt>Kaffeemenge</dt><dd>${fmtNum(r.kaffeemenge, 'g')}</dd>
               </div>
               <div class="detail-row">
-                <dt>Brühzeit</dt>
-                <dd>${fmtSec(r.bruehzeit)}</dd>
+                <dt>Brühzeit</dt><dd>${fmtSec(r.bruehzeit)}</dd>
               </div>
               <div class="detail-row">
-                <dt>Brühmenge</dt>
-                <dd>${fmtNum(r.bruehmenge, 'ml')}</dd>
+                <dt>Brühmenge</dt><dd>${fmtNum(r.bruehmenge, 'ml')}</dd>
               </div>
               ${ratio ? /* html */`
                 <div class="detail-row detail-row--highlight">
-                  <dt>Brühverhältnis</dt>
-                  <dd>${h(ratio)}</dd>
+                  <dt>Brühverhältnis</dt><dd>${h(ratio)}</dd>
                 </div>` : ''}
             </dl>
           </section>
@@ -430,8 +475,8 @@ function renderDetailView() {
 
 function renderFormView() {
   const r     = state.editingId ? state.recipes.find(x => x.id === state.editingId) : null;
-  const v     = (f) => r && r[f] != null ? h(String(r[f])) : '';
-  const chk   = (opt) => r && (r.anwendung || []).includes(opt);
+  const v     = f => r && r[f] != null ? h(String(r[f])) : '';
+  const chk   = opt => r && (r.anwendung || []).includes(opt);
   const title = state.editingId ? 'Rezept bearbeiten' : 'Neues Rezept';
 
   return /* html */`
@@ -441,64 +486,49 @@ function renderFormView() {
           <i data-lucide="x"></i>
         </button>
         <span class="header__title">${h(title)}</span>
-        <button class="btn btn--primary btn--sm" id="btn-save">
-          Speichern
-        </button>
+        <button class="btn btn--primary btn--sm" id="btn-save">Speichern</button>
       </header>
 
       <div class="form-content">
         <form id="recipe-form" novalidate aria-label="${h(title)}">
 
-          <!-- Kaffee -->
           <fieldset class="form-section">
             <legend class="form-section__title">Kaffee</legend>
-
             <div class="form-group">
               <label class="form-label" for="f-marke">Marke</label>
-              <input type="text" id="f-marke" name="marke"
-                class="form-input" value="${v('marke')}"
-                placeholder="z.&nbsp;B. Gardelli, Five Elephant…"
+              <input type="text" id="f-marke" name="marke" class="form-input"
+                value="${v('marke')}" placeholder="z.&nbsp;B. Gardelli, Five Elephant…"
                 autocomplete="off">
             </div>
-
             <div class="form-group">
               <label class="form-label required" for="f-name">Name des Kaffees</label>
-              <input type="text" id="f-name" name="name"
-                class="form-input" value="${v('name')}"
-                placeholder="z.&nbsp;B. Ethiopia Guji Natural"
+              <input type="text" id="f-name" name="name" class="form-input"
+                value="${v('name')}" placeholder="z.&nbsp;B. Ethiopia Guji Natural"
                 required autocomplete="off">
             </div>
           </fieldset>
 
-          <!-- Mahlung -->
           <fieldset class="form-section">
             <legend class="form-section__title">Mahlung</legend>
-
             <div class="form-row">
               <div class="form-group">
                 <label class="form-label" for="f-mahlgrad">Mahlgrad</label>
-                <input type="number" id="f-mahlgrad" name="mahlgrad"
-                  class="form-input" value="${v('mahlgrad')}"
-                  placeholder="z.&nbsp;B. 3.5"
-                  step="0.5" min="0">
+                <input type="number" id="f-mahlgrad" name="mahlgrad" class="form-input"
+                  value="${v('mahlgrad')}" placeholder="3.5" step="0.5" min="0">
               </div>
               <div class="form-group">
                 <label class="form-label" for="f-mahlzeit">Mahlzeit</label>
                 <div class="input-unit-wrap">
-                  <input type="number" id="f-mahlzeit" name="mahlzeit"
-                    class="form-input" value="${v('mahlzeit')}"
-                    placeholder="8"
-                    step="1" min="0">
+                  <input type="number" id="f-mahlzeit" name="mahlzeit" class="form-input"
+                    value="${v('mahlzeit')}" placeholder="8" step="1" min="0">
                   <span class="input-unit">sek</span>
                 </div>
               </div>
             </div>
           </fieldset>
 
-          <!-- Extraktion -->
           <fieldset class="form-section">
             <legend class="form-section__title">Extraktion</legend>
-
             <div class="form-group">
               <label class="form-label" for="f-sieb">Sieb</label>
               <div class="select-wrapper">
@@ -508,41 +538,32 @@ function renderFormView() {
                 </select>
               </div>
             </div>
-
             <div class="form-row">
               <div class="form-group">
                 <label class="form-label" for="f-kaffeemenge">Kaffeemenge</label>
                 <div class="input-unit-wrap">
-                  <input type="number" id="f-kaffeemenge" name="kaffeemenge"
-                    class="form-input" value="${v('kaffeemenge')}"
-                    placeholder="18"
-                    step="0.1" min="0">
+                  <input type="number" id="f-kaffeemenge" name="kaffeemenge" class="form-input"
+                    value="${v('kaffeemenge')}" placeholder="18" step="0.1" min="0">
                   <span class="input-unit">g</span>
                 </div>
               </div>
               <div class="form-group">
                 <label class="form-label" for="f-bruehmenge">Brühmenge</label>
                 <div class="input-unit-wrap">
-                  <input type="number" id="f-bruehmenge" name="bruehmenge"
-                    class="form-input" value="${v('bruehmenge')}"
-                    placeholder="36"
-                    step="1" min="0">
+                  <input type="number" id="f-bruehmenge" name="bruehmenge" class="form-input"
+                    value="${v('bruehmenge')}" placeholder="36" step="1" min="0">
                   <span class="input-unit">ml</span>
                 </div>
               </div>
             </div>
-
             <div class="form-group">
               <label class="form-label" for="f-bruehzeit">Brühzeit</label>
               <div class="input-unit-wrap">
-                <input type="number" id="f-bruehzeit" name="bruehzeit"
-                  class="form-input" value="${v('bruehzeit')}"
-                  placeholder="28"
-                  step="1" min="0">
+                <input type="number" id="f-bruehzeit" name="bruehzeit" class="form-input"
+                  value="${v('bruehzeit')}" placeholder="28" step="1" min="0">
                 <span class="input-unit">sek</span>
               </div>
             </div>
-
             <div class="ratio-preview" id="ratio-preview">
               ${r?.kaffeemenge && r?.bruehmenge ? /* html */`
                 <span class="ratio-preview__label">Brühverhältnis</span>
@@ -552,11 +573,9 @@ function renderFormView() {
             </div>
           </fieldset>
 
-          <!-- Anwendung -->
           <fieldset class="form-section">
             <legend class="form-section__title">Anwendung</legend>
-            <div class="checkbox-group"
-              role="group" aria-label="Anwendung wählen (Mehrfachauswahl)">
+            <div class="checkbox-group" role="group" aria-label="Anwendung wählen">
               ${ANWENDUNG_OPTIONS.map(opt => /* html */`
                 <label class="checkbox-pill">
                   <input type="checkbox" name="anwendung"
@@ -572,7 +591,7 @@ function renderFormView() {
 }
 
 // ============================================================
-//  RENDER DIALOG
+//  DELETE DIALOG
 // ============================================================
 
 function renderDeleteDialog() {
@@ -583,21 +602,20 @@ function renderDeleteDialog() {
         <div class="dialog__icon"><i data-lucide="trash-2"></i></div>
         <h2 class="dialog__title" id="dlg-title">Rezept löschen?</h2>
         <p class="dialog__text">
-          Dieser Eintrag wird dauerhaft gelöscht.<br>Die Aktion kann nicht rückgängig gemacht werden.
+          Dieser Eintrag wird dauerhaft gelöscht.<br>
+          Die Aktion kann nicht rückgängig gemacht werden.
         </p>
         <div class="dialog__actions">
           <button class="btn btn--ghost" id="btn-delete-cancel">Abbrechen</button>
           <button class="btn btn--danger" id="btn-delete-confirm"
-            data-id="${h(state.deleteConfirmId)}">
-            Löschen
-          </button>
+            data-id="${h(state.deleteConfirmId)}">Löschen</button>
         </div>
       </div>
     </div>`;
 }
 
 // ============================================================
-//  NAVIGATION & RE-RENDER
+//  NAVIGATION & REPAINT
 // ============================================================
 
 function navigate(view, opts = {}) {
@@ -612,7 +630,7 @@ function repaint() {
   const root = document.getElementById('app');
 
   let html = '';
-  if (state.view === 'list')   html = renderListView();
+  if      (state.view === 'list')   html = renderListView();
   else if (state.view === 'detail') html = renderDetailView();
   else if (state.view === 'form')   html = renderFormView();
 
@@ -630,7 +648,7 @@ function repaint() {
 function bindEvents() {
   const $ = id => document.getElementById(id);
 
-  // ── List view ────────────────────────────────────────────
+  // ── List ─────────────────────────────────────────────────
 
   $('btn-add')?.addEventListener('click', () => {
     state.editingId = null;
@@ -640,6 +658,21 @@ function bindEvents() {
   $('btn-add-empty')?.addEventListener('click', () => {
     state.editingId = null;
     navigate('form');
+  });
+
+  $('btn-export')?.addEventListener('click', exportRecipes);
+
+  $('import-input')?.addEventListener('change', e => {
+    handleImportFile(e.target.files[0]);
+    e.target.value = '';
+  });
+
+  // Allow keyboard activation of the import label
+  $('btn-import-label')?.addEventListener('keydown', e => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      $('import-input')?.click();
+    }
   });
 
   $('btn-search-toggle')?.addEventListener('click', () => {
@@ -652,14 +685,8 @@ function bindEvents() {
   $('search-input')?.addEventListener('input', e => {
     state.searchQuery = e.target.value;
     repaint();
-    // Keep focus in search input after repaint
     const inp = $('search-input');
-    if (inp) {
-      inp.focus();
-      // restore cursor position
-      const len = inp.value.length;
-      inp.setSelectionRange(len, len);
-    }
+    if (inp) { inp.focus(); const l = inp.value.length; inp.setSelectionRange(l, l); }
   });
 
   $('btn-search-clear')?.addEventListener('click', () => {
@@ -680,7 +707,7 @@ function bindEvents() {
     });
   });
 
-  // ── Detail view ──────────────────────────────────────────
+  // ── Detail ───────────────────────────────────────────────
 
   $('btn-back')?.addEventListener('click', () => navigate('list'));
 
@@ -694,7 +721,7 @@ function bindEvents() {
     repaint();
   });
 
-  // ── Form view ────────────────────────────────────────────
+  // ── Form ─────────────────────────────────────────────────
 
   $('btn-cancel')?.addEventListener('click', () => {
     if (state.editingId) navigate('detail', { activeId: state.editingId });
@@ -708,7 +735,6 @@ function bindEvents() {
     handleSave();
   });
 
-  // Live ratio calculation
   const fK = $('f-kaffeemenge');
   const fB = $('f-bruehmenge');
   if (fK && fB) {
@@ -725,7 +751,7 @@ function bindEvents() {
     fB.addEventListener('input', updateRatio);
   }
 
-  // ── Delete dialog ────────────────────────────────────────
+  // ── Dialog ───────────────────────────────────────────────
 
   $('btn-delete-cancel')?.addEventListener('click', () => {
     state.deleteConfirmId = null;
@@ -743,22 +769,19 @@ function bindEvents() {
     }
   });
 
-  // Keyboard: close dialog on Escape
-  document.addEventListener('keydown', handleKeydown, { once: true });
-}
-
-function handleKeydown(e) {
-  if (e.key === 'Escape' && state.deleteConfirmId) {
-    state.deleteConfirmId = null;
-    repaint();
-  }
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && state.deleteConfirmId) {
+      state.deleteConfirmId = null;
+      repaint();
+    }
+  }, { once: true });
 }
 
 // ============================================================
 //  ACTIONS
 // ============================================================
 
-async function handleSave() {
+function handleSave() {
   const form = document.getElementById('recipe-form');
   if (!form) return;
 
@@ -769,33 +792,30 @@ async function handleSave() {
     showToast('Bitte gib einen Kaffeenamen ein.', 'error');
     return;
   }
-  nameEl?.classList.remove('form-input--error');
+  nameEl.classList.remove('form-input--error');
 
   const fd = new FormData(form);
   const payload = {
     marke:       (fd.get('marke')       || '').trim(),
     name:        (fd.get('name')        || '').trim(),
-    mahlgrad:    fd.get('mahlgrad')    !== '' && fd.get('mahlgrad')    != null ? Number(fd.get('mahlgrad'))    : null,
-    mahlzeit:    fd.get('mahlzeit')    !== '' && fd.get('mahlzeit')    != null ? Number(fd.get('mahlzeit'))    : null,
-    kaffeemenge: fd.get('kaffeemenge') !== '' && fd.get('kaffeemenge') != null ? Number(fd.get('kaffeemenge')) : null,
+    mahlgrad:    fd.get('mahlgrad')    !== '' ? fd.get('mahlgrad')    : null,
+    mahlzeit:    fd.get('mahlzeit')    !== '' ? fd.get('mahlzeit')    : null,
+    kaffeemenge: fd.get('kaffeemenge') !== '' ? fd.get('kaffeemenge') : null,
     sieb:        (fd.get('sieb')        || '').trim(),
-    bruehzeit:   fd.get('bruehzeit')   !== '' && fd.get('bruehzeit')   != null ? Number(fd.get('bruehzeit'))   : null,
-    bruehmenge:  fd.get('bruehmenge')  !== '' && fd.get('bruehmenge')  != null ? Number(fd.get('bruehmenge'))  : null,
+    bruehzeit:   fd.get('bruehzeit')   !== '' ? fd.get('bruehzeit')   : null,
+    bruehmenge:  fd.get('bruehmenge')  !== '' ? fd.get('bruehmenge')  : null,
     anwendung:   fd.getAll('anwendung'),
   };
 
-  const saveBtn = document.getElementById('btn-save');
-  if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = '…'; }
-
   try {
     if (state.editingId) {
-      const updated = await api.update(state.editingId, payload);
+      const updated = storage.update(state.editingId, payload);
       const idx = state.recipes.findIndex(r => r.id === state.editingId);
       if (idx !== -1) state.recipes[idx] = updated;
       showToast('Rezept gespeichert.');
       navigate('detail', { activeId: state.editingId });
     } else {
-      const created = await api.create(payload);
+      const created = storage.create(payload);
       state.recipes.unshift(created);
       showToast('Rezept hinzugefügt.');
       navigate('detail', { activeId: created.id });
@@ -803,16 +823,12 @@ async function handleSave() {
   } catch (err) {
     console.error(err);
     showToast('Fehler beim Speichern.', 'error');
-    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Speichern'; }
   }
 }
 
-async function handleDelete(id) {
-  const confirmBtn = document.getElementById('btn-delete-confirm');
-  if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = '…'; }
-
+function handleDelete(id) {
   try {
-    await api.remove(id);
+    storage.remove(id);
     state.recipes      = state.recipes.filter(r => r.id !== id);
     state.deleteConfirmId = null;
     showToast('Rezept gelöscht.');
@@ -829,18 +845,9 @@ async function handleDelete(id) {
 //  INIT
 // ============================================================
 
-async function init() {
-  state.loading = true;
+function init() {
+  state.recipes = storage.getAll();
   repaint();
-  try {
-    state.recipes = await api.getAll();
-  } catch (err) {
-    console.error(err);
-    showToast('Rezepte konnten nicht geladen werden.', 'error');
-  } finally {
-    state.loading = false;
-    repaint();
-  }
 }
 
 document.addEventListener('DOMContentLoaded', init);

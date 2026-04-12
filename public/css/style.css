@@ -254,6 +254,19 @@ ul, ol { list-style: none; }
 }
 .icon-btn--danger:hover  { background: var(--c-danger-subtle); color: var(--c-danger); }
 
+/* Import label acts as icon button */
+label.icon-btn {
+  cursor: pointer;
+  position: relative;
+}
+label.icon-btn:hover { background: var(--c-surface-2); color: var(--c-text); }
+
+.icon-btn:disabled {
+  opacity: .35;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
 /* ── Buttons ────────────────────────────────────────────────── */
 .btn {
   display: inline-flex;
