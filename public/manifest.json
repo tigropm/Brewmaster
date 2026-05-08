@@ -1,0 +1,25 @@
+{
+  "name": "Brewmaster",
+  "short_name": "Brewmaster",
+  "description": "Brührezepte für Espresso und Filterkaffee",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f5f3f0",
+  "theme_color": "#f5f3f0",
+  "lang": "de",
+  "icons": [
+    {
+      "src": "icon.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
