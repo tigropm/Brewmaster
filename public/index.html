@@ -6,17 +6,47 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Brewmaster">
   <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f5f3f0">
   <meta name="theme-color" media="(prefers-color-scheme: dark)"  content="#0f0d0b">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icon.png">
   <title>Brewmaster</title>
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
   <div id="app" role="main"></div>
 
-  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
-  <script src="js/config.js"></script>
-  <script src="js/render.js"></script>
-  <script src="js/app.js"></script>
+  <!-- Lucide Icons: lokale Datei hat Vorrang, CDN als Fallback -->
+  <script>
+    function loadScript(src, fallbackSrc) {
+      return new Promise(resolve => {
+        const s = document.createElement('script');
+        s.src = src;
+        s.onload = resolve;
+        s.onerror = () => {
+          if (!fallbackSrc) { resolve(); return; }
+          const f = document.createElement('script');
+          f.src = fallbackSrc;
+          f.onload = resolve;
+          f.onerror = resolve; // Auch bei Fehler weitermachen
+          document.head.appendChild(f);
+        };
+        document.head.appendChild(s);
+      });
+    }
+
+    // Erst lokale Datei versuchen, dann CDN, dann No-op-Fallback
+    loadScript('js/lucide.min.js', 'https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js')
+      .then(() => {
+        if (typeof lucide === 'undefined') {
+          window.lucide = { createIcons: () => {} };
+        }
+        // App-Skripte in Reihenfolge laden
+        return loadScript('js/config.js');
+      })
+      .then(() => loadScript('js/render.js'))
+      .then(() => loadScript('js/app.js'));
+  </script>
 </body>
 </html>
